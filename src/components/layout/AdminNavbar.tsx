@@ -1,8 +1,9 @@
 import { useWallet } from '@txnlab/use-wallet-react';
-import { LogOut, PlusCircle, Send, CheckSquare, ShieldCheck } from 'lucide-react';
+import { LogOut, PlusCircle, Send, CheckSquare, ShieldCheck, MessageSquare } from 'lucide-react';
 import React, { useState } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import ConnectWallet from '../ConnectWallet';
+import { ADMIN_WALLET_ADDRESS } from '../../config/admin.config';
 
 const AdminNavbar: React.FC = () => {
     const { activeAddress } = useWallet();
@@ -14,11 +15,14 @@ const AdminNavbar: React.FC = () => {
         setOpenWalletModal(!openWalletModal);
     };
 
+    const isAuthorizedAdmin = activeAddress === ADMIN_WALLET_ADDRESS;
+
     const navLinks = [
         { name: 'Dashboard', path: '/admin', icon: <ShieldCheck size={18} /> },
         { name: 'Sign Attendance', path: '/admin/sign', icon: <CheckSquare size={18} /> },
         { name: 'Mint NFTs', path: '/admin/mint', icon: <PlusCircle size={18} /> },
         { name: 'Manage Credits', path: '/admin/credits', icon: <Send size={18} /> },
+        { name: 'Grievances', path: '/admin/grievances', icon: <MessageSquare size={18} /> },
     ];
 
     return (
@@ -30,7 +34,7 @@ const AdminNavbar: React.FC = () => {
                         Portal
                     </Link>
                     <div className="hidden md:flex gap-1 ml-4">
-                        {navLinks.map((link) => {
+                        {(!activeAddress || isAuthorizedAdmin) && navLinks.map((link) => {
                             const isActive = location.pathname === link.path || (link.path !== '/admin' && location.pathname.startsWith(link.path));
                             return (
                                 <Link
@@ -49,10 +53,10 @@ const AdminNavbar: React.FC = () => {
 
                 <div className="flex gap-4 items-center">
                     <button
-                        className={`btn btn-sm ${activeAddress ? 'btn-outline btn-accent' : 'btn-accent'} px-4 rounded-full shadow-sm`}
+                        className={`btn btn-sm ${!activeAddress ? 'btn-accent' : isAuthorizedAdmin ? 'btn-outline btn-accent' : 'btn-error'} px-4 rounded-full shadow-sm`}
                         onClick={toggleWalletModal}
                     >
-                        {activeAddress ? 'Wallet Connected' : 'Connect Admin Wallet'}
+                        {!activeAddress ? 'Connect Admin Wallet' : isAuthorizedAdmin ? 'Admin Connected' : 'Unauthorized'}
                     </button>
                     <button onClick={() => navigate('/')} className="btn btn-ghost btn-sm btn-circle text-gray-500" title="Exit to Selection">
                         <LogOut size={18} />

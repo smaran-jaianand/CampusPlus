@@ -1,9 +1,19 @@
 import { AlgorandClient } from '@algorandfoundation/algokit-utils'
 import { useWallet } from '@txnlab/use-wallet-react'
 import { useSnackbar } from 'notistack'
-import React, { useMemo, useState } from 'react'
-import { Coins, Send, CheckCircle, Store } from 'lucide-react'
-import { getAlgodConfigFromViteEnvironment } from '../../utils/network/getAlgoClientConfigs'
+import React, { useMemo, useState, useEffect } from 'react'
+import { Coins, Send, CheckCircle, Store, Flame, AlertCircle, CheckSquare } from 'lucide-react'
+import { getAlgodConfigFromViteEnvironment, getIndexerConfigFromViteEnvironment } from '../../utils/network/getAlgoClientConfigs'
+import { BURN_ADDRESS } from '../student/Grievances'
+import { STUDENT_ROSTER } from '../../config/admin.config'
+import * as algokit from '@algorandfoundation/algokit-utils'
+
+interface MissionRequest {
+    txId: string
+    studentAddress: string
+    missionId: string
+    timestamp: number
+}
 
 const ManageCreditsAdmin: React.FC = () => {
     const { activeAddress, transactionSigner } = useWallet()
@@ -19,6 +29,11 @@ const ManageCreditsAdmin: React.FC = () => {
     const [recipient, setRecipient] = useState('')
     const [loadingSend, setLoadingSend] = useState(false)
 
+    // Mission Request State
+    const [pendingRequests, setPendingRequests] = useState<MissionRequest[]>([])
+    const [loadingTasks, setLoadingTasks] = useState(true)
+    const [processingId, setProcessingId] = useState<string | null>(null)
+
     const algorand = useMemo(() => {
         const algodConfig = getAlgodConfigFromViteEnvironment()
         const client = AlgorandClient.fromConfig({ algodConfig })
@@ -26,9 +41,174 @@ const ManageCreditsAdmin: React.FC = () => {
         return client
     }, [transactionSigner])
 
+    const fetchMissionRequests = async () => {
+        try {
+            setLoadingTasks(true)
+            const indexerConfig = getIndexerConfigFromViteEnvironment()
+            const indexer = AlgorandClient.fromConfig({ algodConfig: getAlgodConfigFromViteEnvironment(), indexerConfig }).client.indexer
+
+            // 1. Fetch all MISSION_REQUESTs sent to the BURN_ADDRESS
+            const requestPrefix = new TextEncoder().encode('MISSION_REQUEST:')
+            const requestResponse = await indexer.searchForTransactions()
+                .address(BURN_ADDRESS)
+                .addressRole('receiver')
+                .txType('pay')
+                .notePrefix(requestPrefix)
+                .do()
+
+            // 2. Fetch all MISSION_REWARDs and REJECTs sent BY this admin address
+            const rewardPrefix = new TextEncoder().encode('MISSION_REWARD:')
+            const rewardResponse = activeAddress ? await indexer.searchForTransactions()
+                .address(activeAddress)
+                .addressRole('sender')
+                .txType('pay')
+                .notePrefix(rewardPrefix)
+                .do() : { transactions: [] }
+
+            const rejectPrefix = new TextEncoder().encode('MISSION_REJECTED:')
+            const rejectResponse = activeAddress ? await indexer.searchForTransactions()
+                .address(activeAddress)
+                .addressRole('sender')
+                .txType('pay')
+                .notePrefix(rejectPrefix)
+                .do() : { transactions: [] }
+
+            // Build set of resolved requests (student + missionId)
+            const resolvedPairs = new Set<string>()
+
+            const processVerdict = (txn: any) => {
+                try {
+                    if (txn.note) {
+                        let decodedNote = typeof txn.note === 'string' ? atob(txn.note) : new TextDecoder().decode(txn.note)
+                        const parts = decodedNote.split(':') // e.g MISSION_REWARD:Campus_Tour
+                        if (parts.length >= 2) {
+                            const missionId = parts.slice(1).join(':')
+                            resolvedPairs.add(`${txn.receiver}_${missionId}`)
+                        }
+                    }
+                } catch (e) { }
+            }
+
+            if (rewardResponse.transactions) rewardResponse.transactions.forEach(processVerdict)
+            if (rejectResponse.transactions) rejectResponse.transactions.forEach(processVerdict)
+
+            // Parse incoming requests
+            const pending: MissionRequest[] = []
+            if (requestResponse.transactions) {
+                for (const txn of requestResponse.transactions) {
+                    try {
+                        if (txn.note) {
+                            let decodedNote = typeof txn.note === 'string' ? atob(txn.note) : new TextDecoder().decode(txn.note)
+                            if (decodedNote.startsWith('MISSION_REQUEST:')) {
+                                const missionId = decodedNote.split(':')[1] || ''
+                                const student = (txn.sender as string) || ''
+
+                                // Security Check: Only process requests from enrolled student wallets
+                                if (student && STUDENT_ROSTER.includes(student)) {
+                                    // Check if Admin has already resolved this specific student/mission combo
+                                    if (!resolvedPairs.has(`${student}_${missionId}`)) {
+                                        pending.push({
+                                            txId: txn.id,
+                                            studentAddress: student,
+                                            missionId,
+                                            timestamp: (txn.roundTime || 0) * 1000 || Date.now()
+                                        })
+                                    }
+                                }
+                            }
+                        }
+                    } catch (e) { }
+                }
+            }
+
+            // Deduplicate requests by same person for same mission
+            const uniquePending = pending.filter((v, i, a) => a.findIndex(v2 => (v2.studentAddress === v.studentAddress && v2.missionId === v.missionId)) === i)
+            // Sort by oldest first
+            uniquePending.sort((a, b) => a.timestamp - b.timestamp)
+
+            setPendingRequests(uniquePending)
+        } catch (error) {
+            console.error('Error fetching mission requests', error)
+        } finally {
+            setLoadingTasks(false)
+        }
+    }
+
+    useEffect(() => {
+        fetchMissionRequests()
+    }, [activeAddress])
+
+    const handleApproveMission = async (request: MissionRequest) => {
+        if (!activeAddress) {
+            enqueueSnackbar('Connect admin wallet', { variant: 'error' })
+            return
+        }
+
+        setProcessingId(request.txId)
+        try {
+            // Generate a random ALGO reward between 0.2 and 1.0
+            const randomAlgoReward = (Math.random() * (1.0 - 0.2) + 0.2).toFixed(2)
+
+            enqueueSnackbar(`Sending ${randomAlgoReward} ALGO to student...`, { variant: 'info' })
+
+            // The note must match exactly what the Student UI expects: MISSION_REWARD:{id}
+            const noteString = `MISSION_REWARD:${request.missionId}`
+
+            await algorand.send.payment({
+                sender: activeAddress,
+                receiver: request.studentAddress,
+                amount: algokit.algos(Number(randomAlgoReward)),
+                note: noteString
+            })
+
+            enqueueSnackbar(`Successfully paid ${randomAlgoReward} ALGO and approved mission!`, { variant: 'success' })
+            fetchMissionRequests() // Refresh list
+        } catch (error: any) {
+            console.error(error)
+            enqueueSnackbar(error.message || 'Payment failed', { variant: 'error' })
+        } finally {
+            setProcessingId(null)
+        }
+    }
+
+    const handleRejectMission = async (request: MissionRequest) => {
+        if (!activeAddress) {
+            enqueueSnackbar('Connect admin wallet', { variant: 'error' })
+            return
+        }
+
+        setProcessingId(request.txId)
+        try {
+            enqueueSnackbar(`Rejecting mission...`, { variant: 'info' })
+            const noteString = `MISSION_REJECTED:${request.missionId}`
+
+            // Send 0 ALGO to self, just to log the rejection on-chain so the student UI can read it
+            await algorand.send.payment({
+                sender: activeAddress,
+                receiver: request.studentAddress,
+                amount: algokit.microAlgos(0),
+                note: noteString
+            })
+
+            enqueueSnackbar(`Mission rejected.`, { variant: 'success' })
+            fetchMissionRequests()
+        } catch (error: any) {
+            console.error(error)
+            enqueueSnackbar(error.message || 'Rejection failed', { variant: 'error' })
+        } finally {
+            setProcessingId(null)
+        }
+    }
+
     const onCreateTokens = async () => {
-        if (!activeAddress) return enqueueSnackbar('Connect a wallet first', { variant: 'error' })
-        if (!total || isNaN(Number(total)) || Number(total) <= 0) return enqueueSnackbar('Invalid total amount', { variant: 'error' })
+        if (!activeAddress) {
+            enqueueSnackbar('Connect a wallet first', { variant: 'error' })
+            return
+        }
+        if (!total || isNaN(Number(total)) || Number(total) <= 0) {
+            enqueueSnackbar('Invalid total amount', { variant: 'error' })
+            return
+        }
 
         setLoadingCreate(true)
         try {
@@ -56,9 +236,18 @@ const ManageCreditsAdmin: React.FC = () => {
     }
 
     const onSendTokens = async () => {
-        if (!activeAddress) return enqueueSnackbar('Connect a wallet first', { variant: 'error' })
-        if (!sendAssetId || !sendAmount || !recipient) return enqueueSnackbar('Fill all fields', { variant: 'error' })
-        if (recipient.length !== 58) return enqueueSnackbar('Invalid algorand address', { variant: 'error' })
+        if (!activeAddress) {
+            enqueueSnackbar('Connect a wallet first', { variant: 'error' })
+            return
+        }
+        if (!sendAssetId || !sendAmount || !recipient) {
+            enqueueSnackbar('Fill all fields', { variant: 'error' })
+            return
+        }
+        if (recipient.length !== 58) {
+            enqueueSnackbar('Invalid algorand address', { variant: 'error' })
+            return
+        }
 
         setLoadingSend(true)
         try {
@@ -127,8 +316,8 @@ const ManageCreditsAdmin: React.FC = () => {
                         onClick={onCreateTokens}
                         disabled={loadingCreate || !activeAddress}
                         className={`w-full mt-6 h-14 rounded-xl flex items-center justify-center gap-2 font-bold text-lg transition-all shadow-lg ${loadingCreate || !activeAddress
-                                ? 'bg-slate-100 text-slate-400 cursor-not-allowed shadow-none'
-                                : 'bg-emerald-500 hover:bg-emerald-600 text-white shadow-emerald-200 hover:shadow-emerald-300'
+                            ? 'bg-slate-100 text-slate-400 cursor-not-allowed shadow-none'
+                            : 'bg-emerald-500 hover:bg-emerald-600 text-white shadow-emerald-200 hover:shadow-emerald-300'
                             }`}
                     >
                         {loadingCreate ? (
@@ -201,8 +390,8 @@ const ManageCreditsAdmin: React.FC = () => {
                         onClick={onSendTokens}
                         disabled={loadingSend || !activeAddress}
                         className={`w-full mt-6 h-14 rounded-xl flex items-center justify-center gap-2 font-bold text-lg transition-all shadow-lg ${loadingSend || !activeAddress
-                                ? 'bg-slate-100 text-slate-400 cursor-not-allowed shadow-none'
-                                : 'bg-teal-500 hover:bg-teal-600 text-white shadow-teal-200 hover:shadow-teal-300'
+                            ? 'bg-slate-100 text-slate-400 cursor-not-allowed shadow-none'
+                            : 'bg-teal-500 hover:bg-teal-600 text-white shadow-teal-200 hover:shadow-teal-300'
                             }`}
                     >
                         {loadingSend ? (
@@ -211,6 +400,90 @@ const ManageCreditsAdmin: React.FC = () => {
                             <><Send size={20} /> Transfer Credits</>
                         )}
                     </button>
+                </div>
+            </div>
+
+            {/* Pending Mission Requests Section */}
+            <div className="mt-8 bg-white border border-indigo-50 rounded-3xl p-8 shadow-xl shadow-indigo-100/50 flex flex-col relative overflow-hidden">
+                <div className="absolute top-0 right-0 w-48 h-48 bg-indigo-50/50 rounded-full blur-3xl -translate-y-10 translate-x-10"></div>
+
+                <div className="flex items-center justify-between mb-6 relative z-10">
+                    <div className="flex items-center gap-4">
+                        <div className="w-12 h-12 bg-indigo-100 text-indigo-600 rounded-xl flex items-center justify-center">
+                            <Flame size={24} />
+                        </div>
+                        <div>
+                            <h2 className="text-xl font-bold text-slate-800">Pending Mission Requests</h2>
+                            <p className="text-sm text-slate-500">Approve student missions to automatically send ALGO rewards (0.2 - 1.0 ALGO).</p>
+                        </div>
+                    </div>
+                    <span className="bg-indigo-100 text-indigo-700 px-4 py-1.5 rounded-full text-sm font-bold">
+                        {pendingRequests.length} Pending
+                    </span>
+                </div>
+
+                <div className="relative z-10 w-full">
+                    {loadingTasks ? (
+                        <div className="py-10 flex flex-col items-center justify-center text-slate-400 gap-3">
+                            <span className="loading loading-spinner text-indigo-400"></span>
+                            Fetching blockchain intents...
+                        </div>
+                    ) : pendingRequests.length === 0 ? (
+                        <div className="py-12 flex flex-col items-center justify-center text-slate-400 border-2 border-dashed border-slate-100 rounded-2xl">
+                            <CheckCircle size={40} className="mb-3 text-indigo-200" />
+                            <p className="font-semibold text-slate-500">All caught up!</p>
+                            <p className="text-sm">No new mission rewards requested.</p>
+                        </div>
+                    ) : (
+                        <div className="space-y-4">
+                            {pendingRequests.map(req => (
+                                <div key={req.txId} className="bg-indigo-50/30 border border-indigo-100 rounded-2xl p-4 flex flex-col md:flex-row md:items-center justify-between gap-4 transition-all hover:bg-indigo-50/60">
+                                    <div className="flex items-start gap-4">
+                                        <div className="bg-white p-2.5 rounded-xl border border-indigo-100 shadow-sm shrink-0 mt-1 md:mt-0">
+                                            <AlertCircle size={20} className="text-indigo-500" />
+                                        </div>
+                                        <div>
+                                            <p className="font-bold text-slate-800 flex items-center gap-2">
+                                                Mission: <span className="text-indigo-600 font-mono text-sm bg-indigo-100/50 px-2 py-0.5 rounded-md">{req.missionId}</span>
+                                            </p>
+                                            <p className="text-xs text-slate-500 mt-1 font-mono tracking-tight">
+                                                Student: {req.studentAddress.slice(0, 12)}...{req.studentAddress.slice(-8)}
+                                            </p>
+                                            <p className="text-xs text-slate-400 mt-1">
+                                                Requested: {new Date(req.timestamp).toLocaleString()}
+                                            </p>
+                                        </div>
+                                    </div>
+
+                                    <div className="flex items-center gap-2 shrink-0 self-end md:self-auto">
+                                        <button
+                                            onClick={() => handleRejectMission(req)}
+                                            disabled={processingId !== null || !activeAddress}
+                                            className="px-4 py-2 rounded-xl font-bold text-xs bg-white text-slate-600 border border-slate-200 hover:bg-slate-50 hover:text-red-500 disabled:opacity-50 transition-colors"
+                                        >
+                                            Deny
+                                        </button>
+                                        <button
+                                            onClick={() => handleApproveMission(req)}
+                                            disabled={processingId !== null || !activeAddress}
+                                            className={`px-5 py-2.5 rounded-xl font-bold text-sm flex items-center gap-2 transition-all shadow-sm ${processingId === req.txId
+                                                ? 'bg-indigo-100 text-indigo-400 cursor-wait'
+                                                : processingId !== null || !activeAddress
+                                                    ? 'bg-slate-100 text-slate-400 cursor-not-allowed hidden md:flex'
+                                                    : 'bg-indigo-600 hover:bg-indigo-700 text-white shadow-indigo-200'
+                                                }`}
+                                        >
+                                            {processingId === req.txId ? (
+                                                <><span className="loading loading-spinner loading-xs"></span> Paying...</>
+                                            ) : (
+                                                <><CheckSquare size={16} /> Pay Random ALGO Reward</>
+                                            )}
+                                        </button>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    )}
                 </div>
             </div>
         </div>

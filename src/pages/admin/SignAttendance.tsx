@@ -2,8 +2,8 @@ import * as algosdk from 'algosdk'
 import { useWallet } from '@txnlab/use-wallet-react'
 import { Search, CheckSquare, ShieldCheck, ArrowRight } from 'lucide-react'
 import React, { useState, useMemo } from 'react'
-import { useSnackbar } from 'notistack'
 import { getAlgodConfigFromViteEnvironment } from '../../utils/network/getAlgoClientConfigs'
+import { useSnackbar } from 'notistack'
 import { AlgorandClient } from '@algorandfoundation/algokit-utils'
 import * as algokit from '@algorandfoundation/algokit-utils'
 
@@ -13,12 +13,9 @@ const SignAttendance: React.FC = () => {
     const [tokenInput, setTokenInput] = useState('')
     const [isSigning, setIsSigning] = useState(false)
 
-    const algorand = useMemo(() => {
-        const algodConfig = getAlgodConfigFromViteEnvironment()
-        const client = AlgorandClient.fromConfig({ algodConfig })
-        client.setDefaultSigner(transactionSigner)
-        return client
-    }, [transactionSigner])
+    const algodConfig = getAlgodConfigFromViteEnvironment()
+    const algorand = AlgorandClient.fromConfig({ algodConfig })
+    algorand.setDefaultSigner(transactionSigner)
 
     const handleSign = async () => {
         if (!activeAddress) {
@@ -40,7 +37,7 @@ const SignAttendance: React.FC = () => {
                 sender: activeAddress,
                 receiver: activeAddress,
                 amount: algokit.microAlgos(0),
-                note: `ATTENDANCE_TOKEN:${tokenInput}`
+                note: `ATTENDANCE_TOKEN:${tokenInput}`,
             })
 
             enqueueSnackbar(`Attendance marked! TX ID: ${result.transaction.txID()}`, { variant: 'success' })

@@ -13,12 +13,15 @@ import Attendance from './pages/student/Attendance'
 import Gatepass from './pages/student/Gatepass'
 import Profile from './pages/student/Profile'
 import Store from './pages/student/Store'
+import EarnTokens from './pages/student/EarnTokens'
+import Grievances from './pages/student/Grievances'
 
 // Admin Pages
 import AdminDashboard from './pages/admin/AdminDashboard'
 import SignAttendance from './pages/admin/SignAttendance'
 import MintNFTAdmin from './pages/admin/MintNFT'
 import ManageCreditsAdmin from './pages/admin/ManageCredits'
+import GrievancesAdmin from './pages/admin/GrievancesAdmin'
 
 let supportedWallets: SupportedWallet[]
 if (import.meta.env.VITE_ALGOD_NETWORK === 'localnet') {
@@ -72,7 +75,9 @@ export default function App() {
             {/* Student Portal Routes */}
             <Route path="/student" element={<StudentLayout />}>
               <Route index element={<Attendance />} />
+              <Route path="earn" element={<EarnTokens />} />
               <Route path="gatepass" element={<Gatepass />} />
+              <Route path="grievances" element={<Grievances />} />
               <Route path="profile" element={<Profile />} />
               <Route path="store" element={<Store />} />
             </Route>
@@ -80,9 +85,10 @@ export default function App() {
             {/* Admin Portal Routes */}
             <Route path="/admin" element={<AdminLayout />}>
               <Route index element={<AdminDashboard />} />
-              <Route path="sign" element={<SignAttendance />} />
-              <Route path="mint" element={<MintNFTAdmin />} />
               <Route path="credits" element={<ManageCreditsAdmin />} />
+              <Route path="grievances" element={<GrievancesAdmin />} />
+              <Route path="mint" element={<MintNFTAdmin />} />
+              <Route path="sign" element={<SignAttendance />} />
             </Route>
 
             {/* Fallback */}

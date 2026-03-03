@@ -2,7 +2,7 @@ import { AlgorandClient } from '@algorandfoundation/algokit-utils'
 import { useWallet } from '@txnlab/use-wallet-react'
 import { useSnackbar } from 'notistack'
 import React, { useMemo, useState } from 'react'
-import { PlusCircle, Image as ImageIcon, CheckCircle, Flame } from 'lucide-react'
+import { PlusCircle, Image as ImageIcon, CheckCircle, Flame, Send } from 'lucide-react'
 import { getAlgodConfigFromViteEnvironment } from '../../utils/network/getAlgoClientConfigs'
 import { ipfsHttpUrl, pinFileToIPFS, pinJSONToIPFS } from '../../utils/pinata'
 
@@ -15,6 +15,10 @@ const MintNFTAdmin: React.FC = () => {
     const [loading, setLoading] = useState(false)
     const [mintedId, setMintedId] = useState<bigint | null>(null)
 
+    // Quick Send State
+    const [recipientAddress, setRecipientAddress] = useState('')
+    const [sendingNFT, setSendingNFT] = useState(false)
+
     const algorand = useMemo(() => {
         const algodConfig = getAlgodConfigFromViteEnvironment()
         const client = AlgorandClient.fromConfig({ algodConfig })
@@ -23,15 +27,24 @@ const MintNFTAdmin: React.FC = () => {
     }, [transactionSigner])
 
     async function sha256Hex(data: Uint8Array): Promise<string> {
-        const digest = await crypto.subtle.digest('SHA-256', data)
+        const digest = await crypto.subtle.digest('SHA-256', data as unknown as BufferSource)
         const hashArray = Array.from(new Uint8Array(digest))
         return hashArray.map((b) => b.toString(16).padStart(2, '0')).join('')
     }
 
     const onMint = async () => {
-        if (!activeAddress) return enqueueSnackbar('Connect a wallet first', { variant: 'error' })
-        if (!name || !description) return enqueueSnackbar('Fill all fields', { variant: 'error' })
-        if (!file) return enqueueSnackbar('Select an image', { variant: 'error' })
+        if (!activeAddress) {
+            enqueueSnackbar('Connect a wallet first', { variant: 'error' })
+            return
+        }
+        if (!name || !description) {
+            enqueueSnackbar('Fill all fields', { variant: 'error' })
+            return
+        }
+        if (!file) {
+            enqueueSnackbar('Select an image', { variant: 'error' })
+            return
+        }
 
         setLoading(true)
         setMintedId(null)
@@ -89,6 +102,43 @@ const MintNFTAdmin: React.FC = () => {
         }
     }
 
+    const onSendNFT = async () => {
+        if (!activeAddress) {
+            enqueueSnackbar('Connect a wallet first', { variant: 'error' })
+            return
+        }
+        if (!mintedId) {
+            enqueueSnackbar('No NFT minted', { variant: 'error' })
+            return
+        }
+        if (!recipientAddress || recipientAddress.length !== 58) {
+            enqueueSnackbar('Invalid Algorand address', { variant: 'error' })
+            return
+        }
+
+        setSendingNFT(true)
+        try {
+            enqueueSnackbar('Please sign the transfer transaction...', { variant: 'info' })
+
+            await algorand.send.assetTransfer({
+                sender: activeAddress,
+                receiver: recipientAddress,
+                assetId: mintedId,
+                amount: 1n,
+            })
+
+            enqueueSnackbar(`Successfully sent NFT to ${recipientAddress.substring(0, 8)}...`, { variant: 'success' })
+            setRecipientAddress('')
+            // Optionally clear mintedId to return to fresh state
+            // setMintedId(null)
+        } catch (e: any) {
+            console.error(e)
+            enqueueSnackbar(e.message || 'Transfer failed. Has the student opted in to this Asset ID?', { variant: 'error' })
+        } finally {
+            setSendingNFT(false)
+        }
+    }
+
     return (
         <div className="flex flex-col max-w-4xl mx-auto w-full">
             <div className="mb-10 text-center">
@@ -109,12 +159,50 @@ const MintNFTAdmin: React.FC = () => {
                         <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 font-mono text-lg text-slate-800 mb-8 inline-block shadow-sm">
                             Asset ID: {mintedId.toString()}
                         </div>
+
+                        {/* Quick Send Section */}
+                        <div className="max-w-md mx-auto bg-white border border-slate-100 rounded-2xl p-6 shadow-sm mb-8">
+                            <h3 className="font-bold text-slate-800 mb-2 flex items-center justify-center gap-2">
+                                <Send size={18} className="text-fuchsia-500" /> Quick Transfer
+                            </h3>
+                            <p className="text-xs text-slate-500 mb-4">
+                                Send this NFT directly to a student. <br />
+                                <strong className="text-amber-600">Note:</strong> The student must opt-in to Asset ID {mintedId.toString()} first.
+                            </p>
+                            <input
+                                type="text"
+                                className="block w-full px-4 py-2 bg-slate-50 border-2 border-slate-100 rounded-xl text-slate-900 focus:ring-0 focus:border-fuchsia-400 transition-colors shadow-sm font-mono text-xs mb-3"
+                                placeholder="Student Wallet Address"
+                                value={recipientAddress}
+                                onChange={(e) => setRecipientAddress(e.target.value)}
+                                disabled={sendingNFT}
+                            />
+                            <button
+                                onClick={onSendNFT}
+                                disabled={sendingNFT || !recipientAddress || recipientAddress.length !== 58}
+                                className={`w-full h-10 rounded-xl flex items-center justify-center gap-2 font-bold text-sm transition-all ${sendingNFT || !recipientAddress || recipientAddress.length !== 58
+                                    ? 'bg-slate-100 text-slate-400 cursor-not-allowed hidden md:flex'
+                                    : 'bg-fuchsia-100 text-fuchsia-700 hover:bg-fuchsia-200'
+                                    }`}
+                            >
+                                {sendingNFT ? (
+                                    <><span className="loading loading-spinner loading-xs"></span> Sending...</>
+                                ) : (
+                                    'Send to Student'
+                                )}
+                            </button>
+                        </div>
+
                         <div>
                             <button
-                                onClick={() => setMintedId(null)}
+                                onClick={() => {
+                                    setMintedId(null)
+                                    setRecipientAddress('')
+                                }}
+                                disabled={sendingNFT}
                                 className="btn bg-fuchsia-600 hover:bg-fuchsia-700 text-white border-none rounded-xl px-8 shadow-lg shadow-fuchsia-200"
                             >
-                                Mint Another
+                                Mint Another Certificate
                             </button>
                         </div>
                     </div>
@@ -176,8 +264,8 @@ const MintNFTAdmin: React.FC = () => {
                             onClick={onMint}
                             disabled={loading || !activeAddress}
                             className={`w-full mt-4 h-14 rounded-xl flex items-center justify-center gap-2 font-bold text-lg transition-all shadow-lg ${loading || !activeAddress
-                                    ? 'bg-slate-100 text-slate-400 cursor-not-allowed shadow-none'
-                                    : 'bg-gradient-to-r from-fuchsia-500 to-purple-600 hover:from-fuchsia-600 hover:to-purple-700 text-white shadow-fuchsia-200 hover:shadow-purple-300'
+                                ? 'bg-slate-100 text-slate-400 cursor-not-allowed shadow-none'
+                                : 'bg-gradient-to-r from-fuchsia-500 to-purple-600 hover:from-fuchsia-600 hover:to-purple-700 text-white shadow-fuchsia-200 hover:shadow-purple-300'
                                 }`}
                         >
                             {loading ? (

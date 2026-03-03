@@ -1,10 +1,95 @@
 import { useWallet } from '@txnlab/use-wallet-react'
 import { ShieldCheck, Users, CheckSquare, PlusCircle, Send } from 'lucide-react'
-import React from 'react'
+import React, { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
+import { AlgorandClient } from '@algorandfoundation/algokit-utils'
+import { getAlgodConfigFromViteEnvironment, getIndexerConfigFromViteEnvironment } from '../../utils/network/getAlgoClientConfigs'
+import { STUDENT_ROSTER } from '../../config/admin.config'
 
 const AdminDashboard: React.FC = () => {
     const { activeAddress } = useWallet()
+
+    const [stats, setStats] = useState({
+        students: 0,
+        presentToday: 0,
+        certsIssued: 0,
+        tokensCirculating: 0
+    })
+    const [loadingStats, setLoadingStats] = useState(false)
+
+    useEffect(() => {
+        if (!activeAddress) return
+
+        const fetchDashboardStats = async () => {
+            setLoadingStats(true)
+            try {
+                const indexerConfig = getIndexerConfigFromViteEnvironment()
+                const indexer = AlgorandClient.fromConfig({ algodConfig: getAlgodConfigFromViteEnvironment(), indexerConfig }).client.indexer
+
+                // 1. Total Enrolled Students (From our static roster for now)
+                const totalStudents = STUDENT_ROSTER.length
+
+                // 2. Present Today (Count of ATTENDANCE_TICKET transactions from Admin today)
+                const today = new Date()
+                today.setHours(0, 0, 0, 0)
+                const isoDateString = today.toISOString()
+
+                const attendancePrefix = new TextEncoder().encode('ATTENDANCE_TICKET')
+                const attendanceResponse = await indexer.searchForTransactions()
+                    .address(activeAddress)
+                    .addressRole('sender')
+                    .txType('pay')
+                    .notePrefix(attendancePrefix)
+                    .afterTime(isoDateString)
+                    .do()
+
+                // Since attendance is one ticket per student per day, just count valid payloads sent to roster members
+                const presentToday = attendanceResponse.transactions?.filter((txn: any) => txn.receiver && STUDENT_ROSTER.includes(txn.receiver)).length || 0
+
+                // 3. Certificates Issued (Count of ASA creations by Admin with unitName 'CERT')
+                const assetsResponse = await indexer.searchForAssets()
+                    .creator(activeAddress)
+                    .unit('CERT')
+                    .do()
+
+                const certsIssued = assetsResponse.assets?.length || 0
+
+                // 4. Tokens Distributed (Sum of all real ALGO sent via MISSION_REWARD)
+                const rewardPrefix = new TextEncoder().encode('MISSION_REWARD:')
+                const rewardResponse = await indexer.searchForTransactions()
+                    .address(activeAddress)
+                    .addressRole('sender')
+                    .txType('pay')
+                    .notePrefix(rewardPrefix)
+                    .do()
+
+                let tokensCirculating = 0
+                if (rewardResponse.transactions) {
+                    for (const txn of rewardResponse.transactions) {
+                        if (txn['payment-transaction'] && txn['payment-transaction'].amount) {
+                            // Sum microAlgos and convert to ALGO
+                            const amountAlgo = txn['payment-transaction'].amount / 1_000_000
+                            tokensCirculating += amountAlgo
+                        }
+                    }
+                }
+
+                setStats({
+                    students: totalStudents,
+                    presentToday,
+                    certsIssued,
+                    tokensCirculating: parseFloat(tokensCirculating.toFixed(2))
+                })
+
+            } catch (error) {
+                console.error("Failed to load dashboard stats", error)
+            } finally {
+                setLoadingStats(false)
+            }
+        }
+
+        fetchDashboardStats()
+    }, [activeAddress])
 
     return (
         <div className="flex flex-col max-w-5xl mx-auto w-full">
@@ -97,21 +182,33 @@ const AdminDashboard: React.FC = () => {
                         </div>
 
                         <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
-                            <div className="border-l-2 border-teal-500/30 pl-4">
+                            <div className="border-l-2 border-teal-500/30 pl-4 transition-all hover:border-teal-500 focus-within:border-teal-500">
                                 <p className="text-slate-400 text-xs font-bold uppercase tracking-wider mb-1">Total Students</p>
-                                <p className="text-3xl font-black text-white">1,248</p>
+                                <p className="text-3xl font-black text-white">
+                                    {loadingStats ? <span className="loading loading-spinner loading-md text-teal-500 opacity-50"></span> : stats.students}
+                                </p>
                             </div>
-                            <div className="border-l-2 border-cyan-500/30 pl-4">
+                            <div className="border-l-2 border-cyan-500/30 pl-4 transition-all hover:border-cyan-500 focus-within:border-cyan-500">
                                 <p className="text-slate-400 text-xs font-bold uppercase tracking-wider mb-1">Present Today</p>
-                                <p className="text-3xl font-black text-cyan-400">1,102</p>
+                                <p className="text-3xl font-black text-cyan-400">
+                                    {loadingStats ? <span className="loading loading-spinner loading-md text-cyan-500 opacity-50"></span> : stats.presentToday}
+                                </p>
                             </div>
-                            <div className="border-l-2 border-fuchsia-500/30 pl-4">
+                            <div className="border-l-2 border-fuchsia-500/30 pl-4 transition-all hover:border-fuchsia-500 focus-within:border-fuchsia-500">
                                 <p className="text-slate-400 text-xs font-bold uppercase tracking-wider mb-1">Certificates Issued</p>
-                                <p className="text-3xl font-black text-white">3,492</p>
+                                <p className="text-3xl font-black text-white">
+                                    {loadingStats ? <span className="loading loading-spinner loading-md text-fuchsia-500 opacity-50"></span> : stats.certsIssued.toLocaleString()}
+                                </p>
                             </div>
-                            <div className="border-l-2 border-emerald-500/30 pl-4">
-                                <p className="text-slate-400 text-xs font-bold uppercase tracking-wider mb-1">Tokens Circulating</p>
-                                <p className="text-3xl font-black text-white">45.2K</p>
+                            <div className="border-l-2 border-emerald-500/30 pl-4 transition-all hover:border-emerald-500 focus-within:border-emerald-500">
+                                <p className="text-slate-400 text-xs font-bold uppercase tracking-wider mb-1">Total Rewards Disbursed</p>
+                                <p className="text-3xl font-black text-white flex items-end gap-1">
+                                    {loadingStats ? <span className="loading loading-spinner loading-md text-emerald-500 opacity-50"></span> : (
+                                        <>
+                                            {stats.tokensCirculating.toLocaleString()} <span className="text-sm text-emerald-500 mb-1 font-bold">ALGO</span>
+                                        </>
+                                    )}
+                                </p>
                             </div>
                         </div>
                     </div>

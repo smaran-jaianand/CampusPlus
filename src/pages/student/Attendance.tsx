@@ -226,7 +226,17 @@ const Attendance: React.FC = () => {
                         <div className="bg-indigo-50 border border-indigo-100 rounded-xl px-4 py-3 text-center">
                             <p className="text-xs font-bold text-indigo-500 uppercase tracking-widest mb-1">Attendance Rate</p>
                             <p className="text-2xl font-black text-indigo-900">
-                                {history.length > 0 ? Math.round((verifiedTokens.size / history.length) * 100) : 0}%
+                                {(() => {
+                                    if (history.length === 0) return 0;
+                                    const twoWeeksAgo = new Date();
+                                    twoWeeksAgo.setDate(twoWeeksAgo.getDate() - 14);
+                                    const twoWeeksMs = twoWeeksAgo.getTime();
+                                    const validHistory = history.filter(h => h.timestamp >= twoWeeksMs);
+                                    const validHistoryCount = validHistory.length;
+                                    if (validHistoryCount === 0) return 0;
+                                    const validVerifiedCount = validHistory.filter(h => verifiedTokens.has(h.tokenString)).length;
+                                    return Math.round((validVerifiedCount / validHistoryCount) * 100);
+                                })()}%
                             </p>
                         </div>
                     </div>

@@ -10,6 +10,7 @@ const Profile: React.FC = () => {
     const [history, setHistory] = useState<AttendanceToken[]>([])
     const [verifiedCount, setVerifiedCount] = useState<number>(0)
     const [attendanceRate, setAttendanceRate] = useState<number>(0)
+    const [campusCredits, setCampusCredits] = useState<number>(0)
 
     // Load history and verify tokens on mount
     useEffect(() => {
@@ -63,15 +64,90 @@ const Profile: React.FC = () => {
                             }
                         } catch (e) { }
                     }
-                    setVerifiedCount(verifiedSet.size)
-                    setAttendanceRate(Math.round((verifiedSet.size / localHistory.length) * 100))
+
+                    const twoWeeksMs = twoWeeksAgo.getTime()
+                    const validHistory = localHistory.filter(h => h.timestamp >= twoWeeksMs)
+                    const validHistoryCount = validHistory.length
+
+                    const validVerifiedCount = validHistory.filter(h => verifiedSet.has(h.tokenString)).length
+
+                    setVerifiedCount(validVerifiedCount)
+                    setAttendanceRate(validHistoryCount > 0 ? Math.round((validVerifiedCount / validHistoryCount) * 100) : 0)
                 }
             } catch (error) {
                 console.error(error)
             }
         }
 
+        const fetchCredits = async () => {
+            try {
+                const indexerConfig = getIndexerConfigFromViteEnvironment()
+                const algodConfig = getAlgodConfigFromViteEnvironment()
+                const algorand = AlgorandClient.fromConfig({ algodConfig, indexerConfig })
+
+                let totalCredits = 0
+
+                // 1. Fetch ASA balances (Campus Credit sent by Admin)
+                const accountInfo = await algorand.client.indexer.lookupAccountAssets(activeAddress).do()
+                if (accountInfo.assets) {
+                    for (const asset of accountInfo.assets) {
+                        // Assuming the admin created asset has ID 1045892, or we find it by looking up the asset details
+                        // For simplicity, here we'll grab the asset details to verify its name
+                        try {
+                            const assetDetails = await algorand.client.indexer.lookupAssetByID(Number(asset.assetId)).do()
+                            if (assetDetails.asset.params.name === 'Campus Credit') {
+                                totalCredits += Number(asset.amount)
+                            }
+                        } catch (e) {
+                            // ignore assets we can't look up
+                        }
+                    }
+                }
+
+                // 2. Fetch completed missions (self-transactions with MISSION_REWARD)
+                const missionPrefix = new TextEncoder().encode('MISSION_REWARD:')
+                const response = await algorand.client.indexer.searchForTransactions()
+                    .address(activeAddress)
+                    .addressRole('sender')
+                    .txType('pay')
+                    .notePrefix(missionPrefix)
+                    .do()
+
+                if (response.transactions) {
+                    for (const txn of response.transactions) {
+                        // Ensure it's a self-transaction
+                        if (txn.paymentTransaction && txn.paymentTransaction.receiver === activeAddress) {
+                            try {
+                                if (txn.note) {
+                                    let decodedNote = ''
+                                    if (typeof txn.note === 'string') {
+                                        decodedNote = atob(txn.note)
+                                    } else {
+                                        decodedNote = new TextDecoder().decode(txn.note)
+                                    }
+
+                                    // Extract reward value e.g., MISSION_REWARD:50:Campus_Tour
+                                    const parts = decodedNote.split(':')
+                                    if (parts.length >= 2) {
+                                        const value = parseInt(parts[1], 10)
+                                        if (!isNaN(value)) {
+                                            totalCredits += value
+                                        }
+                                    }
+                                }
+                            } catch (e) { }
+                        }
+                    }
+                }
+
+                setCampusCredits(totalCredits)
+            } catch (error) {
+                console.error('Error fetching credits:', error)
+            }
+        }
+
         checkConfirmation()
+        fetchCredits()
     }, [activeAddress])
 
     return (
@@ -127,7 +203,7 @@ const Profile: React.FC = () => {
                                 <div className="absolute -right-4 -top-4 w-24 h-24 bg-white/20 rounded-full blur-xl group-hover:scale-150 transition-transform"></div>
                                 <Award size={28} className="mb-4 text-amber-100" />
                                 <p className="text-amber-100 font-medium text-sm mb-1">Campus Credits</p>
-                                <h3 className="text-4xl font-black text-transparent bg-clip-text bg-gradient-to-br from-white to-amber-100">1,250</h3>
+                                <h3 className="text-4xl font-black">{campusCredits.toLocaleString()}</h3>
                             </div>
                         </div>
 

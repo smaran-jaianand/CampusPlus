@@ -1,8 +1,9 @@
 import { useWallet } from '@txnlab/use-wallet-react';
-import { LogOut, QrCode, Shield, User, ShoppingBag } from 'lucide-react';
+import { LogOut, QrCode, Shield, User, ShoppingBag, Flame, MessageSquare, AlertTriangle } from 'lucide-react';
 import React, { useState } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import ConnectWallet from '../ConnectWallet';
+import { ADMIN_WALLET_ADDRESS } from '../../config/admin.config';
 
 const StudentNavbar: React.FC = () => {
     const { activeAddress } = useWallet();
@@ -14,15 +15,25 @@ const StudentNavbar: React.FC = () => {
         setOpenWalletModal(!openWalletModal);
     };
 
+    const isAdmin = activeAddress === ADMIN_WALLET_ADDRESS;
+
     const navLinks = [
         { name: 'Attendance', path: '/student', icon: <QrCode size={18} /> },
+        { name: 'Earn Tokens', path: '/student/earn', icon: <Flame size={18} /> },
         { name: 'Gatepass', path: '/student/gatepass', icon: <Shield size={18} /> },
+        { name: 'Grievances', path: '/student/grievances', icon: <MessageSquare size={18} /> },
         { name: 'Profile', path: '/student/profile', icon: <User size={18} /> },
         { name: 'Store', path: '/student/store', icon: <ShoppingBag size={18} /> },
     ];
 
     return (
         <>
+            {isAdmin && (
+                <div className="bg-red-500 text-white text-xs font-bold py-1.5 px-4 flex items-center justify-center gap-2 tracking-wide shadow-sm z-[60] relative">
+                    <AlertTriangle size={14} />
+                    ADMIN WALLET DETECTED: You are currently viewing the Student Portal using the Master Admin account.
+                </div>
+            )}
             <nav className="bg-white/60 backdrop-blur-lg shadow-sm border-b border-indigo-100 px-6 py-4 flex justify-between items-center z-50 sticky top-0">
                 <div className="flex items-center gap-6 text-indigo-900">
                     <Link to="/" className="text-xl font-black tracking-tight flex items-center gap-2">
@@ -49,10 +60,10 @@ const StudentNavbar: React.FC = () => {
 
                 <div className="flex gap-4 items-center">
                     <button
-                        className={`btn btn-sm ${activeAddress ? 'btn-outline border-indigo-300 text-indigo-700 hover:bg-indigo-50 hover:border-indigo-400' : 'btn-primary bg-indigo-600 hover:bg-indigo-700 border-none'} px-5 rounded-xl shadow-md`}
+                        className={`btn btn-sm ${!activeAddress ? 'btn-primary bg-indigo-600 hover:bg-indigo-700 border-none' : isAdmin ? 'btn-outline border-red-300 text-red-600 hover:bg-red-50 hover:border-red-400' : 'btn-outline border-indigo-300 text-indigo-700 hover:bg-indigo-50 hover:border-indigo-400'} px-5 rounded-xl shadow-md`}
                         onClick={toggleWalletModal}
                     >
-                        {activeAddress ? 'Connected' : 'Connect Wallet'}
+                        {!activeAddress ? 'Connect Wallet' : isAdmin ? 'Admin Connected' : 'Connected'}
                     </button>
                     <button onClick={() => navigate('/')} className="btn btn-ghost btn-sm btn-circle text-indigo-400 hover:text-indigo-600" title="Exit to Selection">
                         <LogOut size={18} />
