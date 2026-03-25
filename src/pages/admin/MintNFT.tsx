@@ -60,7 +60,7 @@ const MintNFTAdmin: React.FC = () => {
                 image_mimetype: file.type || 'image/png',
                 external_url: imageUrl,
                 properties: {
-                    issuer: 'BlockCampus System',
+                    issuer: 'CampusPlus System',
                 },
             }
 
