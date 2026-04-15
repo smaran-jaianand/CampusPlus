@@ -36,8 +36,9 @@ const Gatepass: React.FC = () => {
   useEffect(() => {
     if (activeAddress) {
       refreshGatepassState(activeAddress)
-      const interval = window.setInterval(() => refreshGatepassState(activeAddress), 3000)
-      return () => window.clearInterval(interval)
+      const onStorageChange = () => refreshGatepassState(activeAddress)
+      window.addEventListener('storage', onStorageChange)
+      return () => window.removeEventListener('storage', onStorageChange)
     } else {
       setToken(null)
       setEntryRequestStatus(null)

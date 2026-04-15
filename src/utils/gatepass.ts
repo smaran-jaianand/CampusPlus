@@ -66,7 +66,11 @@ const writeRequests = (requests: GatepassEntryRequest[]) => {
   localStorage.setItem(REQUESTS_KEY, JSON.stringify(requests))
 }
 
-export const isLateEntry = (timestamp: number) => new Date(timestamp).getHours() > DESIGNATED_RETURN_HOUR
+export const isLateEntry = (entryTimestamp: number, exitTimestamp: number) => {
+  const designatedReturnDeadline = new Date(exitTimestamp)
+  designatedReturnDeadline.setHours(DESIGNATED_RETURN_HOUR, 0, 0, 0)
+  return entryTimestamp > designatedReturnDeadline.getTime()
+}
 
 export const isGatepassDisabledForMonth = (wallet: string, timestamp = Date.now()) => {
   const state = readStudentState(wallet)
@@ -136,13 +140,13 @@ export const approveEntryRequest = (requestId: string, approvedAt = Date.now()) 
     ...request,
     status: 'approved',
     approvedAt,
-    wasLate: isLateEntry(approvedAt),
+    wasLate: isLateEntry(approvedAt, request.exitAt),
   }
   requests[requestIndex] = updatedRequest
   writeRequests(requests)
 
   const state = readStudentState(request.wallet)
-  const monthKey = getMonthKey(approvedAt)
+  const monthKey = getMonthKey(request.exitAt)
   if (updatedRequest.wasLate) {
     const nextLateCount = (state.lateCounts[monthKey] || 0) + 1
     state.lateCounts[monthKey] = nextLateCount

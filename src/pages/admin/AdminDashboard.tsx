@@ -107,8 +107,9 @@ const AdminDashboard: React.FC = () => {
       return
     }
     refreshPendingRequests()
-    const interval = window.setInterval(refreshPendingRequests, 3000)
-    return () => window.clearInterval(interval)
+    const onStorageChange = () => refreshPendingRequests()
+    window.addEventListener('storage', onStorageChange)
+    return () => window.removeEventListener('storage', onStorageChange)
   }, [activeAddress])
 
   const handleApproveEntryRequest = (requestId: string) => {
